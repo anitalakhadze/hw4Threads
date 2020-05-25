@@ -28,12 +28,12 @@ public class CrackerTest {
 //        assertEquals("g", c.baseConversion(6, c.CHARS));
 //    }
 
-    @Test
-    public void testPermutations(){
-        c.makeKLengthPerms(2);
-        System.out.println(c.allPermutations);
-        System.out.println(c.allPermutations.size());
-    }
+//    @Test
+//    public void testPermutations(){
+//        c.makeKLengthPerms(2);
+//        System.out.println(c.allPermutations);
+//        System.out.println(c.allPermutations.size());
+//    }
 
 
 }

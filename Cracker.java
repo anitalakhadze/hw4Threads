@@ -4,18 +4,20 @@
 */
 
 import java.nio.charset.StandardCharsets;
-import java.security.*;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.LinkedBlockingDeque;
 
 public class Cracker {
 	// Array of chars used to produce strings
 	public static final char[] CHARS = "abcdefghijklmnopqrstuvwxyz0123456789.,-!".toCharArray();
-	public static List<String> allPermutations = new ArrayList<>();
 	private static CountDownLatch latch;
 	private static String result;
+	private static BlockingQueue<String> permutations;
 	
 	/*
 	 Given a byte[] array, produces a hex String,
@@ -23,11 +25,11 @@ public class Cracker {
 	 (provided code)
 	*/
 	public static String hexToString(byte[] bytes) {
-		StringBuffer buff = new StringBuffer();
-		for (int i=0; i<bytes.length; i++) {
-			int val = bytes[i];
+		StringBuilder buff = new StringBuilder();
+		for (int aByte : bytes) {
+			int val = aByte;
 			val = val & 0xff;  // remove higher bits, sign
-			if (val<16) buff.append('0'); // leading 0
+			if (val < 16) buff.append('0'); // leading 0
 			buff.append(Integer.toString(val, 16));
 		}
 		return buff.toString();
@@ -52,55 +54,61 @@ public class Cracker {
 		return md.digest(input.getBytes(StandardCharsets.UTF_8));
 	}
 
-	public static void makeKLengthPerms(int k){
-		int n = CHARS.length;
-		makeKLengthPermsRec("", n, k);
-	}
-
-	public static void makeKLengthPermsRec(String prefix, int n, int k){
-		if (k == 0){
-			allPermutations.add(prefix);
-			return;
-		}
-		for (int i = 0; i < n; i++) {
-			String newPrefix = prefix + CHARS[i];
-			makeKLengthPermsRec(newPrefix, n, k-1);
-		}
-	}
-
 	static class Worker extends Thread{
 		String hash;
 		int start, end;
-		boolean foundResult;
-		List<String> allPermutations;
+		BlockingQueue<String> allPermutations;
 
-		Worker (String hash, int start, int end, List<String> allPerms){
+		Worker (String hash, int start, int end, BlockingQueue<String> allPerms){
 			this.hash = hash;
 			this.start = start;
 			this.end = end;
 			this.allPermutations = allPerms;
-			foundResult = false;
 		}
 
 		public void run(){
 			while (start != end - 1){
 				try {
-					String currentString = allPermutations.get(start);
+					String currentString = allPermutations.take();
 					String currentHash = Cracker.hexToString(generateHash(currentString));
 					if(currentHash.equals(hash)){
 						result = currentString;
 						break;
 					}
 					start++;
-				} catch (NoSuchAlgorithmException e) {
+				} catch (NoSuchAlgorithmException | InterruptedException e) {
 					System.out.println(e.getMessage());
 				}
 			}
 			latch.countDown();
 		}
 	}
-	
-	
+
+	static class Producer extends Thread {
+		private int sizeOfPermutations;
+
+		public Producer(int len){
+			sizeOfPermutations = len;
+		}
+
+		public void run(){
+			int n = CHARS.length;
+			makeKLengthPermsRec("", n, sizeOfPermutations);
+		}
+
+		void makeKLengthPermsRec(String prefix, int n, int k){
+			if (k == 0){
+				permutations.add(prefix);
+				return;
+			}
+			for (int i = 0; i < n; i++) {
+				String newPrefix = prefix + CHARS[i];
+				makeKLengthPermsRec(newPrefix, n, k-1);
+			}
+		}
+
+	}
+
 	public static void main(String[] args) throws InterruptedException {
 //		if (args.length < 2) {
 //			System.out.println("Args: target length [workers]");
@@ -116,8 +124,8 @@ public class Cracker {
 		// a! 34800e15707fae815d7c90d49de44aca97e2d759
 		// xyz 66b27417d37e024c46526c2f6d358a754fc552f3
 
-		String targ = "34800e15707fae815d7c90d49de44aca97e2d759";
-		int len = 2;
+		String targ = "66b27417d37e024c46526c2f6d358a754fc552f3";
+		int len = 3;
 		int numWorkers = 4;
 
 		// YOUR CODE HERE
@@ -126,18 +134,20 @@ public class Cracker {
 
 	private static String crack(String hash, int len, int numWorkers) throws InterruptedException {
 		latch = new CountDownLatch(numWorkers);
+		permutations = new LinkedBlockingDeque<>();
 		List<Worker> workers = new ArrayList<>();
-		System.out.println("Going to make all permutations");
-		makeKLengthPerms(len);
-		System.out.println("Permutations are complete");
-		int lenOneWorker = allPermutations.size() / numWorkers;
+		int permutationsSize = (int)Math.pow(CHARS.length, len);
+		int lenOneWorker = permutationsSize / numWorkers;
 		for (int i = 0; i < numWorkers; i++) {
 			int start = i * lenOneWorker;
 			int end = (i + 1) * lenOneWorker;
-			if (i == numWorkers - 1) end = allPermutations.size();
-			Worker worker = new Worker(hash, start, end, allPermutations);
+			if (i == numWorkers - 1) end = permutationsSize;
+			Worker worker = new Worker(hash, start, end, permutations);
 			workers.add(worker);
 		}
+		Producer producer = new Producer(len);
+		producer.start();
+
 		for (Worker worker : workers){
 			worker.start();
 		}
